@@ -1,5 +1,6 @@
 // server.js
 const express = require("express");
+const redisClient = require('./redis');
 const passport = require("passport");
 const GoogleStrategy = require("passport-google-oauth20").Strategy;
 // const cookieSession = require("cookie-session");
@@ -46,6 +47,21 @@ pool.connect().then(client => {
     console.error("Database connection error: ", err);
     process.exit(1);
 })
+
+app.get('/', (req, res) => {
+  res.send('Welcome to the URL shortener API!');
+});
+
+// Example of how to check Redis connection within the app
+app.get('/redis-status', async (req, res) => {
+  // Check if Redis is connected by querying it
+  try {
+    const response = await redisClient.ping();
+    return res.json({ message: 'Redis is connected', response });
+  } catch (err) {
+    return res.status(500).json({ message: 'Redis connection failed', error: err.message });
+  }
+});
 
 // Start the server
 app.listen(process.env.PORT, () => {

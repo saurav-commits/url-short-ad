@@ -1,8 +1,13 @@
 const express = require('express');
 const geoip = require('geoip-lite');
+const uaParser = require("ua-parser-js"); 
 const { getUserRequestCount, logUserRequest } = require('../models/userRequestModel');
 const { createShortUrl, getLongUrlByShortUrl } = require('../models/shortUrlModel'); 
 const { logRedirectEvent }  = require("../models/redirectLogModel");
+const pool = require("../db");
+const authenticateUser = require("../middleware/authMiddleware");
+const { redisClient } = require('../redis');
+
 
 
 const shortenRouter = express.Router();
@@ -64,6 +69,290 @@ shortenRouter.get('/:short_url', async (req, res) => {
         return res.status(500).json({ message: 'Internal Server Error' });
     }
 });
+
+// Get URL Analytics
+// shortenRouter.get("/analytics/:alias", async (req, res) => {
+//     const { alias } = req.params;
+
+//     try {
+//         // Step 1: Check if the short URL exists in logs
+//         const urlExists = await pool.query(
+//             "SELECT COUNT(*) FROM redirect_logs WHERE alias = $1",
+//             [alias]
+//         );
+
+//         if (parseInt(urlExists.rows[0].count) === 0) {
+//             return res.status(404).json({ message: "Short URL not found" });
+//         }
+
+//         // Step 2: Fetch analytics data
+
+//         // 2.1 Get Total Clicks
+//         const totalClicksResult = await pool.query(
+//             "SELECT COUNT(*) AS total_clicks FROM redirect_logs WHERE alias = $1",
+//             [alias]
+//         );
+//         const totalClicks = parseInt(totalClicksResult.rows[0].total_clicks) || 0;
+
+//         // 2.2 Get Unique Users (based on distinct IP addresses)
+//         const uniqueUsersResult = await pool.query(
+//             "SELECT COUNT(DISTINCT ip_address) AS unique_users FROM redirect_logs WHERE alias = $1",
+//             [alias]
+//         );
+//         const uniqueUsers = parseInt(uniqueUsersResult.rows[0].unique_users) || 0;
+
+//         // 2.3 Get Clicks by Date (Last 7 Days)
+//         const clicksByDateResult = await pool.query(
+//             `SELECT DATE(timestamp) AS date, COUNT(*) AS click_count 
+//              FROM redirect_logs 
+//              WHERE alias = $1 AND timestamp >= NOW() - INTERVAL '7 days' 
+//              GROUP BY DATE(timestamp) 
+//              ORDER BY DATE(timestamp) DESC`,
+//             [alias]
+//         );
+//         const clicksByDate = clicksByDateResult.rows.map(row => ({
+//             date: row.date,
+//             clickCount: parseInt(row.click_count)
+//         }));
+
+//         // 2.4 Get Clicks by OS Type
+//         const osTypeResult = await pool.query(
+//             `SELECT user_agent FROM redirect_logs WHERE alias = $1`,
+//             [alias]
+//         );
+
+//         const osData = {};
+//         osTypeResult.rows.forEach(row => {
+//             const parsedUA = uaParser(row.user_agent);
+//             const osName = parsedUA.os.name || "Unknown";
+//             if (!osData[osName]) {
+//                 osData[osName] = { uniqueClicks: 0, uniqueUsers: new Set() };
+//             }
+//             osData[osName].uniqueClicks += 1;
+//             osData[osName].uniqueUsers.add(row.ip_address);
+//         });
+
+//         const osType = Object.keys(osData).map(osName => ({
+//             osName,
+//             uniqueClicks: osData[osName].uniqueClicks,
+//             uniqueUsers: osData[osName].uniqueUsers.size
+//         }));
+
+//         // 2.5 Get Clicks by Device Type
+//         const deviceData = {};
+//         osTypeResult.rows.forEach(row => {
+//             const parsedUA = uaParser(row.user_agent);
+//             const deviceType = parsedUA.device.type || "desktop";
+//             if (!deviceData[deviceType]) {
+//                 deviceData[deviceType] = { uniqueClicks: 0, uniqueUsers: new Set() };
+//             }
+//             deviceData[deviceType].uniqueClicks += 1;
+//             deviceData[deviceType].uniqueUsers.add(row.ip_address);
+//         });
+
+//         const deviceType = Object.keys(deviceData).map(deviceName => ({
+//             deviceName,
+//             uniqueClicks: deviceData[deviceName].uniqueClicks,
+//             uniqueUsers: deviceData[deviceName].uniqueUsers.size
+//         }));
+
+//         // Step 3: Return the response
+//         return res.json({
+//             totalClicks,
+//             uniqueUsers,
+//             clicksByDate,
+//             osType,
+//             deviceType
+//         });
+
+//     } catch (error) {
+//         console.error("Error fetching analytics:", error);
+//         return res.status(500).json({ message: "Internal Server Error" });
+//     }
+// });
+
+shortenRouter.get('/analytics/:alias', async (req, res) => {
+    const { alias } = req.params;
+
+    try {
+        // Check cache
+        const cachedData = await redisClient.get(`analytics:${alias}`);
+        if (cachedData) {
+            console.log('Serving from cache');
+            return res.json(JSON.parse(cachedData));
+        }
+
+        console.log('Fetching from DB');
+
+        const totalClicksResult = await pool.query(
+            "SELECT COUNT(*) AS total_clicks FROM redirect_logs WHERE alias = $1",
+            [alias]
+        );
+        const totalClicks = parseInt(totalClicksResult.rows[0].total_clicks) || 0;
+
+        const uniqueUsersResult = await pool.query(
+            "SELECT COUNT(DISTINCT ip_address) AS unique_users FROM redirect_logs WHERE alias = $1",
+            [alias]
+        );
+        const uniqueUsers = parseInt(uniqueUsersResult.rows[0].unique_users) || 0;
+
+        const analyticsData = { totalClicks, uniqueUsers };
+
+        // Store in Redis with expiration (e.g., 5 minutes)
+        await redisClient.setEx(`analytics:${alias}`, 300, JSON.stringify(analyticsData));
+
+        return res.json(analyticsData);
+    } catch (error) {
+        console.error("Error fetching analytics:", error);
+        return res.status(500).json({ message: "Internal Server Error" });
+    }
+});
+
+
+// Get Topic-Based Analytics
+// shortenRouter.get("/analytics/topic/:topic", async (req, res) => {
+//     const topic = req.params.topic;
+
+//     const query = `
+//         SELECT 
+//             su.short_url, 
+//             COUNT(rl.id) AS totalClicks, 
+//             COUNT(DISTINCT rl.ip_address) AS uniqueUsers
+//         FROM short_urls su
+//         JOIN redirect_logs rl ON su.short_url = rl.alias
+//         WHERE su.topic = $1
+//         GROUP BY su.short_url
+//     `;
+
+//     try {
+//         const { rows } = await pool.query(query, [topic]);
+//         res.json({
+//             totalClicks: rows.reduce((sum, row) => sum + Number(row.totalclicks), 0),
+//             uniqueUsers: rows.reduce((sum, row) => sum + Number(row.uniqueusers), 0),
+//             urls: rows.map(row => ({
+//                 shortUrl: row.short_url,
+//                 totalClicks: Number(row.totalclicks),
+//                 uniqueUsers: Number(row.uniqueusers),
+//             }))
+//         });
+//     } catch (error) {
+//         console.error("Error fetching topic analytics:", error);
+//         res.status(500).json({ error: "Internal server error" });
+//     }
+
+// });
+
+shortenRouter.get("/analytics/topic/:topic", async (req, res) => {
+    const topic = req.params.topic;
+    const cacheKey = `analytics:${topic}`;
+
+    try {
+        // Check Redis cache first
+        const cachedData = await redisClient.get(cacheKey);
+        if (cachedData) {
+            return res.json(JSON.parse(cachedData)); // Return cached response
+        }
+
+        // Query database if cache is empty
+        const query = `
+            SELECT 
+                su.short_url, 
+                COUNT(rl.id) AS totalClicks, 
+                COUNT(DISTINCT rl.ip_address) AS uniqueUsers
+            FROM short_urls su
+            JOIN redirect_logs rl ON su.short_url = rl.alias
+            WHERE su.topic = $1
+            GROUP BY su.short_url
+        `;
+
+        const { rows } = await pool.query(query, [topic]);
+
+        const responseData = {
+            totalClicks: rows.reduce((sum, row) => sum + Number(row.totalclicks), 0),
+            uniqueUsers: rows.reduce((sum, row) => sum + Number(row.uniqueusers), 0),
+            urls: rows.map(row => ({
+                shortUrl: row.short_url,
+                totalClicks: Number(row.totalclicks),
+                uniqueUsers: Number(row.uniqueusers),
+            }))
+        };
+
+        // Store result in Redis cache for 10 minutes (600 seconds)
+        await redisClient.setEx(cacheKey, 600, JSON.stringify(responseData));
+
+        res.json(responseData);
+    } catch (error) {
+        console.error("Error fetching topic analytics:", error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+shortenRouter.get('/analytic/overall', authenticateUser, async (req, res) => {
+    try {
+        const userId = req.user; // Get from JWT/session
+        const cacheKey = `analytics:overall:${userId}`;
+
+        // Check Redis cache first
+        const cachedData = await redisClient.get(cacheKey);
+        if (cachedData) {
+            return res.status(200).json(JSON.parse(cachedData)); // Return cached response
+        }
+
+        // 1. Total URLs created by the user
+        const { rows: totalUrlsData } = await pool.query(
+            'SELECT COUNT(*) FROM short_urls WHERE user_id = $1', [userId]
+        );
+        const totalUrls = parseInt(totalUrlsData[0].count, 10);
+
+        // 2. Total clicks across all URLs created by the user
+        const { rows: totalClicksData } = await pool.query(
+            'SELECT COUNT(*) FROM redirect_logs JOIN short_urls ON redirect_logs.alias = short_urls.short_url WHERE short_urls.user_id = $1', [userId]
+        );
+        const totalClicks = parseInt(totalClicksData[0].count, 10);
+
+        // 3. Total unique users who accessed the user's URLs
+        const { rows: uniqueUsersData } = await pool.query(
+            'SELECT COUNT(DISTINCT user_agent) FROM redirect_logs JOIN short_urls ON redirect_logs.alias = short_urls.short_url WHERE short_urls.user_id = $1', [userId]
+        );
+        const uniqueUsers = parseInt(uniqueUsersData[0].count, 10);
+
+        // 4. Clicks by date (last 7 days)
+        const { rows: clicksByDateData } = await pool.query(
+            'SELECT DATE(redirect_logs.timestamp) AS date, COUNT(*) AS click_count FROM redirect_logs JOIN short_urls ON redirect_logs.alias = short_urls.short_url WHERE short_urls.user_id = $1 AND redirect_logs.timestamp >= NOW() - INTERVAL \'7 days\' GROUP BY date ORDER BY date DESC', [userId]
+        );
+
+        // 5. Clicks by OS
+        const { rows: osTypeData } = await pool.query(
+            'SELECT CASE WHEN user_agent LIKE \'%Windows%\' THEN \'Windows\' WHEN user_agent LIKE \'%Mac%\' THEN \'macOS\' WHEN user_agent LIKE \'%Linux%\' THEN \'Linux\' WHEN user_agent LIKE \'%iPhone%\' THEN \'iOS\' WHEN user_agent LIKE \'%Android%\' THEN \'Android\' ELSE \'Other\' END AS os_name, COUNT(DISTINCT user_agent) AS unique_users, COUNT(*) AS unique_clicks FROM redirect_logs JOIN short_urls ON redirect_logs.alias = short_urls.short_url WHERE short_urls.user_id = $1 GROUP BY os_name', [userId]
+        );
+
+        // 6. Clicks by device type
+        const { rows: deviceTypeData } = await pool.query(
+            'SELECT CASE WHEN user_agent LIKE \'%Mobile%\' OR user_agent LIKE \'%Android%\' OR user_agent LIKE \'%iPhone%\' THEN \'Mobile\' ELSE \'Desktop\' END AS device_name, COUNT(DISTINCT user_agent) AS unique_users, COUNT(*) AS unique_clicks FROM redirect_logs JOIN short_urls ON redirect_logs.alias = short_urls.short_url WHERE short_urls.user_id = $1 GROUP BY device_name', [userId]
+        );
+
+        // Build response object
+        const response = {
+            totalUrls,
+            totalClicks,
+            uniqueUsers,
+            clicksByDate: clicksByDateData,
+            osType: osTypeData,
+            deviceType: deviceTypeData,
+        };
+
+        // Store result in Redis cache for 10 minutes
+        await redisClient.setEx(cacheKey, 600, JSON.stringify(response));
+
+        // Return response
+        res.status(200).json(response);
+    } catch (error) {
+        console.error('Error fetching overall analytics:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+
 
 
 module.exports = shortenRouter;

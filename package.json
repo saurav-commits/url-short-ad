@@ -27,7 +27,8 @@
     "pg": "^8.13.2",
     "redis": "^4.7.0",
     "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.1",
+    "ua-parser-js": "^2.0.2"
   },
   "devDependencies": {
     "jest": "^29.7.0",
