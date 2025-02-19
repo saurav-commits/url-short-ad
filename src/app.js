@@ -9,20 +9,10 @@ const app = express();
 const pool = require('./db');
 const authRouter = require('./routes/auth');
 const shortenRouter = require('./routes/shorten');
-
+// const swaggerUi = require("swagger-ui-express");
+const { swaggerDocs, swaggerUi } = require('./swagger'); // Import Swagger setup
 
 let dbReady = false; 
-
-// Google OAuth credentials (from Google Developer Console)
-// const GOOGLE_CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID";
-// const GOOGLE_CLIENT_SECRET = "YOUR_GOOGLE_CLIENT_SECRET";
-
-// Use cookie-session for session management
-// app.use(cookieSession({
-//   name: "session",
-//   keys: process.env.SESSION_SECRET,
-//   maxAge: 24 * 60 * 60 * 1000, // 24 hours
-// }));
 
 app.use(
   session({
@@ -30,14 +20,18 @@ app.use(
     resave: false,
     saveUninitialized: false,
   })
-)
+);
 
 // Initialize Passport.js
 app.use(express.json());
 app.use(passport.initialize());
 app.use(passport.session());
+
 app.use('/auth', authRouter);
 app.use('/api/short', shortenRouter);
+// Serve Swagger API docs
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
+console.log(JSON.stringify(swaggerDocs, null, 2));
 
 pool.connect().then(client => {
     console.log("Database connection established.");
@@ -66,4 +60,5 @@ app.get('/redis-status', async (req, res) => {
 // Start the server
 app.listen(process.env.PORT, () => {
   console.log("Server started on http://localhost:3000");
+  console.log(`Swagger docs available at http://localhost:${process.env.PORT}/api-docs`);
 });

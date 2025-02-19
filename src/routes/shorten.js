@@ -15,6 +15,50 @@ const shortenRouter = express.Router();
 // Define the rate limit (max requests per hour)
 const RATE_LIMIT = 10;
 
+/**
+ * @swagger
+ * /api/short/shorten:
+ *   post:
+ *     summary: Create a short URL
+ *     description: Generates a short URL from a long URL.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               longUrl:
+ *                 type: string
+ *                 example: "https://example.com"
+ *               customAlias:
+ *                 type: string
+ *                 example: "myalias"
+ *               topic:
+ *                 type: string
+ *                 example: "technology"
+ *               userId:
+ *                 type: string
+ *                 example: "user123"
+ *     responses:
+ *       201:
+ *         description: Short URL created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 shortUrl:
+ *                   type: string
+ *                   example: "http://localhost:3000/abc123"
+ *                 createdAt:
+ *                   type: string
+ *                   format: date-time
+ *       429:
+ *         description: Rate limit exceeded
+ *       500:
+ *         description: Internal Server Error
+ */
 shortenRouter.post('/shorten', async (req, res) => {
     const { longUrl, customAlias, topic, userId } = req.body;
 
@@ -43,6 +87,29 @@ shortenRouter.post('/shorten', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/short/{short_url}:
+ *   get:
+ *     summary: Redirect to the original long URL from a shortened URL
+ *     description: Fetches the long URL from the database using the provided short URL and redirects the user.
+ *     tags: 
+ *       - URL Shortener
+ *     parameters:
+ *       - in: path
+ *         name: short_url
+ *         required: true
+ *         description: The short URL alias
+ *         schema:
+ *           type: string
+ *     responses:
+ *       302:
+ *         description: Redirects to the long URL
+ *       404:
+ *         description: Short URL not found
+ *       500:
+ *         description: Internal Server Error
+ */
 shortenRouter.get('/:short_url', async (req, res) => {
     const { short_url } = req.params;
     console.log("params", req.params);
@@ -171,6 +238,40 @@ shortenRouter.get('/:short_url', async (req, res) => {
 //     }
 // });
 
+/**
+ * @swagger
+ * /api/short/analytics/{alias}:
+ *   get:
+ *     summary: Get analytics for a shortened URL
+ *     description: Fetches analytics data, including total clicks and unique users, for a given short URL alias.
+ *     tags:
+ *       - URL Shortener
+ *     parameters:
+ *       - in: path
+ *         name: alias
+ *         required: true
+ *         description: The alias of the shortened URL
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved analytics data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 totalClicks:
+ *                   type: integer
+ *                   example: 150
+ *                 uniqueUsers:
+ *                   type: integer
+ *                   example: 120
+ *       404:
+ *         description: Alias not found
+ *       500:
+ *         description: Internal Server Error
+ */
 shortenRouter.get('/analytics/:alias', async (req, res) => {
     const { alias } = req.params;
 
@@ -242,6 +343,54 @@ shortenRouter.get('/analytics/:alias', async (req, res) => {
 
 // });
 
+/**
+ * @swagger
+ * /api/short/analytics/topic/{topic}:
+ *   get:
+ *     summary: Get analytics for a specific topic
+ *     description: Fetches analytics data for all shortened URLs under a specific topic, including total clicks and unique users.
+ *     tags:
+ *       - URL Shortener
+ *     parameters:
+ *       - in: path
+ *         name: topic
+ *         required: true
+ *         description: The topic associated with the shortened URLs
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved analytics data for the topic
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 totalClicks:
+ *                   type: integer
+ *                   example: 500
+ *                 uniqueUsers:
+ *                   type: integer
+ *                   example: 400
+ *                 urls:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       shortUrl:
+ *                         type: string
+ *                         example: "abc123"
+ *                       totalClicks:
+ *                         type: integer
+ *                         example: 100
+ *                       uniqueUsers:
+ *                         type: integer
+ *                         example: 80
+ *       404:
+ *         description: Topic not found
+ *       500:
+ *         description: Internal Server Error
+ */
 shortenRouter.get("/analytics/topic/:topic", async (req, res) => {
     const topic = req.params.topic;
     const cacheKey = `analytics:${topic}`;
@@ -287,6 +436,79 @@ shortenRouter.get("/analytics/topic/:topic", async (req, res) => {
     }
 });
 
+
+/**
+ * @swagger
+ * /api/short/analytic/overall:
+ *   get:
+ *     summary: Get overall analytics for the authenticated user
+ *     description: Fetches overall analytics for the authenticated user, including total URLs, clicks, unique users, and click distribution by date, OS, and device type.
+ *     tags:
+ *       - URL Shortener
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved overall analytics data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 totalUrls:
+ *                   type: integer
+ *                   example: 25
+ *                 totalClicks:
+ *                   type: integer
+ *                   example: 500
+ *                 uniqueUsers:
+ *                   type: integer
+ *                   example: 400
+ *                 clicksByDate:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       date:
+ *                         type: string
+ *                         format: date
+ *                         example: "2024-02-10"
+ *                       click_count:
+ *                         type: integer
+ *                         example: 50
+ *                 osType:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       os_name:
+ *                         type: string
+ *                         example: "Windows"
+ *                       unique_users:
+ *                         type: integer
+ *                         example: 200
+ *                       unique_clicks:
+ *                         type: integer
+ *                         example: 300
+ *                 deviceType:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       device_name:
+ *                         type: string
+ *                         example: "Mobile"
+ *                       unique_users:
+ *                         type: integer
+ *                         example: 150
+ *                       unique_clicks:
+ *                         type: integer
+ *                         example: 250
+ *       401:
+ *         description: Unauthorized - Missing or invalid token
+ *       500:
+ *         description: Internal Server Error
+ */
 shortenRouter.get('/analytic/overall', authenticateUser, async (req, res) => {
     try {
         const userId = req.user; // Get from JWT/session
